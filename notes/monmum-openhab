@@ -1,0 +1,71 @@
+Trying OpenHAB as a monmum console and rules engine
+
+
+Installed on server, setup a reverse web proxy to provide security.
+
+Installed mqtt binding, linked to broker with permission to read all mm events.
+
+Installed the Map transformation.
+
+Defined map truefalse.map:
+true=ON
+false=OFF
+
+Defined some items such as:
+
+Number  LivingRoomTemp          "The Temperature is [%.1f C]" <temperature> {mqtt="<[dl1mq:mm/granny90/1925b6ef/temperature/internal:state:default]"}
+Number  BedRoomTemp             "The Temperature is [%.1f C]" <temperature> {mqtt="<[dl1mq:mm/granny90/2c19e0ef/temperature/internal:state:default]"}
+Number  BathRoomTemp            "The Temperature is [%.1f C]" <temperature> {mqtt="<[dl1mq:mm/granny90/2c198eef/temperature/internal:state:default]"}
+
+Switch  LivingRoomMoving        "Moving now: [%s]" <default> {mqtt="<[dl1mq:mm/granny90/1925b6ef/movement/moving:state:MAP(truefalse.map)]"}
+Switch  BedRoomMoving           "Moving now: [%s]" <default> {mqtt="<[dl1mq:mm/granny90/2c19e0ef/movement/moving:state:MAP(truefalse.map)]"}
+Switch  BathRoomMoving          "Moving now: [%s]" <default> {mqtt="<[dl1mq:mm/granny90/2c198eef/movement/moving:state:MAP(truefalse.map)]"}
+
+// Test data
+Switch  Test1Moving             "Moving now: [%s]" <default> {mqtt="<[dl1mq:mm/demo/1/movement/moving:state:MAP(truefalse.map)]"}
+
+Created 'demo' user in Mosquitto, and added script mm-post-moving on Ram for test purposes.
+
+Added switch item to HabPanel for each Moving item. Looks OK, but they really are switches and can be turned on
+and off by hand...
+
+Added some charts for temperature, but they don't want to work without a persistence store.
+Installed SQLite persistence. Lacking info on config...
+Aha: https://github.com/openhab/openhab1-addons/wiki/Persistence
+
+Watch out for the keywords - they must start with a capital letter, and nothing tells you if you get it wrong!
+
+services/runtime.cfg:
+------------------------------------------------------------------------
+org.eclipse.smarthome.persistence:default=jdbc
+------------------------------------------------------------------------
+
+services/jdbc.cfg:
+------------------------------------------------------------------------
+url=jdbc:sqlite:./persistence/sqlite.db
+------------------------------------------------------------------------
+
+persistence/jdbc.persist:
+------------------------------------------------------------------------
+// Persist to sqlite DB
+
+// persistence strategies have a name and a definition and are referred to in the "Items" section
+Strategies {
+        // if no strategy is specified for an item entry below, the default list will be used
+        default = everyChange
+}
+Items {
+        // persist all items once a day and on every change and restore them from the db at startup
+        // careful, this might result in huge databases - that's why it is in comment here ;
+        * : strategy = everyChange, everyDay, restoreOnStartup
+        // persist all temperature and weather values at every change and every hour
+        // * : strategy = everyChange, everyHour
+}
+------------------------------------------------------------------------
+
+Logging:
+
+This is controlled in /var/lib/openhab2/etc/org.ops4j.pax.logging.cfg
+I changed some INFO items to DEBUG.
+
+

@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# influxdb-backup
+#
+# Backup the monitoring-mum time-series database
+
+PATH=/usr/bin:/bin
+export PATH
+
+BACKUPDIR=/fs1/www/ajf/dl1.findlays.net/backup
+
+DIRNAME=monmum-`date +%Y%m%d%H%M%S`
+BACKUPDAYS=30
+
+if ! cd "${BACKUPDIR}"
+then
+	echo "Cannot cd to ${BACKUPDIR}"
+	exit 2
+fi
+
+influxd backup -database monmum "./${DIRNAME}"
+
+# Remove old backups
+find "${BACKUPDIR}" -maxdepth 1 -type d -name 'monmum-*' -mtime +${BACKUPDAYS} -exec rm -r '{}' ';'
+

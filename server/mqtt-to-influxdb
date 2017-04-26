@@ -1,0 +1,298 @@
+#!/usr/bin/env python
+#
+# mqtt-to-influxdb - logs MQTT messages in an InfluxDB time-series database
+#
+# Andrew Findlay
+# 14 Dec 2016
+
+from __future__ import print_function
+
+import sys
+import time
+from datetime import datetime
+import argparse
+import paho.mqtt.client as mqtt
+from influxdb import InfluxDBClient
+import ConfigParser
+import re
+from threading import Timer
+
+defaultConfigFile = '/fs1/www/ajf/dl1.findlays.net/etc/mqtt-to-influxdb.conf'
+
+# Debug defaults off
+debug = False
+
+# writeToDB defaults on
+writeToDB = True
+
+# Keep track of which sensors are online
+isOnline = {}
+
+# Subscription pattern for checking what is online
+subsOnlinePattern = 'mm/+/+/$online'
+# Subscription pattern for normal running
+subsPattern = 'mm/#'
+
+# Temperature offset to account for sensor self-heating
+espNodeTempOffset = -4.0
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-n', '--noaction', action='store_true', help='Do not write to database')
+parser.add_argument('-d', '--debug', action='store_true', help='Print debug messages')
+parser.add_argument('-f', '--configfile', help='Configuration file', default=defaultConfigFile)
+args = parser.parse_args()
+
+if args.debug:
+    debug = True
+
+if args.noaction:
+    writeToDB = False
+
+# The config file has sections 'mqtt' and 'influxdb'
+# Each contains values for 'host' 'port' 'user' 'password'
+config = ConfigParser.SafeConfigParser()
+if not config.read(args.configfile):
+    print( "Cannot read config file " + args.configfile, file=sys.stderr)
+    exit(1)
+
+mqttHost = config.get('mqtt', 'host')
+mqttPort = config.get('mqtt', 'port')
+mqttUser = config.get('mqtt', 'user')
+mqttPass = config.get('mqtt', 'password')
+
+if not (mqttHost and mqttPort and mqttUser and mqttPass):
+    print( "Config file must specify host,port,username and password in mqtt section", file=sys.stderr)
+    exit(2)
+
+influxdbHost = config.get('influxdb', 'host')
+influxdbPort = config.get('influxdb', 'port')
+influxdbUser = config.get('influxdb', 'user')
+influxdbPass = config.get('influxdb', 'password')
+influxdbName = config.get('influxdb', 'dbname')
+
+if not (influxdbHost and influxdbPort and influxdbName and influxdbUser and influxdbPass):
+    print( "Config file must specify host,port,dbname,username and password in influxdb section", file=sys.stderr)
+    exit(2)
+
+# Subscribe to the full pattern in place of the 'online' pattern
+def full_subscribe():
+    client.subscribe(subsPattern)
+    client.unsubscribe(subsOnlinePattern)
+
+# The callback for when the client receives a CONNACK response from the server.
+def on_connect(client, userdata, rc):
+    if debug:
+	print("Connected with result code "+str(rc), file=sys.stderr)
+    # Subscribing in on_connect() means that if we lose the connection and
+    # reconnect then subscriptions will be renewed.
+    # client.subscribe("homie/#")
+    client.subscribe(subsOnlinePattern)
+
+    # Wait 10 seconds before subscribing to the complete message feed
+    Timer(10, full_subscribe, ()).start()
+
+# The callback for when a PUBLISH message is received from the server.
+def on_message(client, userdata, msg):
+    if debug:
+	print(time.strftime("%Y%m%d %X")+" "+msg.topic+" "+str(msg.payload), file=sys.stderr)
+	sys.stdout.flush();
+
+    try:
+	# Pull apart the message topic which has the form:
+	# mm/mansreach/1925b6ef/temperature/internal
+	# mm/mansreach/1925b6ef/light/level
+	# mm/mansreach/1925b6ef/movement/recent
+	# mm/mansreach/1925b6ef/$stats/signal
+	# mm/mansreach/1925b6ef/$name
+	# mm/mansreach/1925b6ef/$online false
+
+	# Note the use of a raw string here to avoid having to escape backslashes
+	topicRE = re.compile( r"^mm/([a-z0-9_-]+)/([a-z0-9_-]+)/([a-z0-9_$-]+)/?([a-z0-9_$-]+)?/?([a-z0-9_$-]+)?$")
+	topic = topicRE.search( msg.topic )
+	if not topic:
+	    print( "Message topic does not match the required pattern: " + msg.topic, file=sys.stderr)
+	    return
+
+	if re.search( r'\$(type|properties)$', msg.topic ):
+	    # We don't need these
+	    return
+
+	# Extract components from topic name
+	account = topic.group(1)
+	node = topic.group(2)
+	category = topic.group(3)
+
+	if (category == '$online'):
+	    if (msg.payload == 'true'):
+		online = True
+	    elif (msg.payload == 'false'):
+	        online = False
+	    else:
+	    	# Bad value - ignore it
+		return
+
+	    if debug:
+		print( "ONLINE: ", account+'/'+node, online )
+	    isOnline[account+'/'+node] = online
+	    # Now drop through to allow this to be recorded in the database
+
+	# Handle metadata messages
+	# Only record them if the node is thought to be online
+	# (but always record the online/offline reports)
+	if (category[:1] == '$') and ((category == '$online') or isOnline[account+'/'+node]):
+	    instance = topic.group(4)
+	    if instance:
+		homie = category + '/' + instance
+	    else:
+		homie = category
+
+	    if debug:
+	        print( "METADATA write: ", homie, " '", msg.payload, "'" )
+
+	    if writeToDB:
+		influx.write_points(
+		  [
+		   {
+		    "measurement": account,
+		    "tags": {
+			"node": node,
+			"category": homie
+		    },
+		    "fields": {
+			"homie": msg.payload
+		    }
+		   }
+		  ] )
+
+	if not isOnline[account+'/'+node]:
+	    # Do not record data unless the node is believed to be currently online
+	    return
+
+	if (category == 'temperature'):
+	    instance = topic.group(4)
+	    tempString = msg.payload
+	    floatRE = re.compile( r"^-?[0-9]+(\.[0-9]+)?$" )
+	    if not floatRE.search( tempString ):
+		# Ignore messages that do not have valid numerical values
+		# e.g. 'unit c' and 'temperature none' messages
+		# print( "Bad number format in temperature report: " + msg.topic + " " + msg.payload, file=sys.stderr)
+		return
+
+	    if debug:
+	        print( "TEMPERATURE write" )
+
+	    tempOffset = 0
+	    if (re.search('^[a-z0-9]{8}$', node)):
+	        if debug:
+		    print( "Applying temp offset to esp8266 node" )
+		tempOffset = espNodeTempOffset
+
+	    if writeToDB:
+		influx.write_points(
+		  [
+		   {
+		    "measurement": account,
+		    "tags": {
+			"node": node,
+			"category": category,
+			"instance": instance
+		    },
+		    "fields": {
+			"celsius": float( tempString ) + tempOffset
+		    }
+		   }
+		  ] )
+
+	    return
+
+
+	if (category == 'movement'):
+	    instance = topic.group(4)
+	    moving = None
+	    if msg.payload == 'true':
+		moving = True
+	    elif msg.payload == 'false':
+		moving = False
+	    else:
+		print( "Bad boolean format in movement report: " + msg.topic + " " + msg.payload, file=sys.stderr)
+		return
+
+	    if debug:
+	        print( "MOVEMENT write" )
+
+	    if writeToDB:
+		influx.write_points(
+		  [
+		   {
+		    "measurement": account,
+		    "tags": {
+			"node": node,
+			"category": category,
+			"instance": instance
+		    },
+		    "fields": {
+			"moving": moving
+		    }
+		   }
+		  ] )
+
+	    return
+
+	if (category == 'light'):
+	    instance = topic.group(4)
+	    luxString = msg.payload
+	    floatRE = re.compile( r"^-?[0-9]+(\.[0-9]+)?$" )
+	    if not floatRE.search( luxString ):
+		# Ignore light reports that do not contain numbers
+		# print( "Bad number format in light report: " + msg.topic + " " + msg.payload, file=sys.stderr)
+		return
+
+	    if debug:
+	        print( "LIGHT write" )
+
+	    if writeToDB:
+		influx.write_points(
+		  [
+		   {
+		    "measurement": account,
+		    "tags": {
+			"node": node,
+			"category": category,
+			"instance": instance
+		    },
+		    "fields": {
+			"lux": float( luxString )
+		    }
+		   }
+		  ] )
+
+	    return
+
+    except KeyboardInterrupt:
+	# Pass ctl-C up the line
+	raise
+    except:
+	e = sys.exc_info()[0]
+	print("Error while handling MQTT message: ", repr(e), file=sys.stderr)
+
+
+client = mqtt.Client()
+client.on_connect = on_connect
+client.on_message = on_message
+client.username_pw_set(mqttUser, mqttPass)
+
+client.connect(mqttHost, mqttPort, 60)
+
+# Now connect to the InfluxDB
+# influx = InfluxDBClient(host='127.0.0.1', port=8086, username='root', password='root', database='dbname')
+influx = InfluxDBClient(host=influxdbHost, port=influxdbPort, database=influxdbName)
+
+try:
+    # Blocking call that processes network traffic, dispatches callbacks and
+    # handles reconnecting.
+    # Other loop*() functions are available that give a threaded interface and a
+    # manual interface.
+    client.loop_forever()
+except KeyboardInterrupt:
+    print('Goodbye.', file=sys.stderr)
+

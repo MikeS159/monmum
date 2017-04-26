@@ -1,0 +1,95 @@
+Monitoring Mum
+
+Many people have an elderly relative who lives alone. Eventually this
+becomes a worry.  Making daily visits or even twice-daily phonecalls
+is not an option for most people, and the elderly relative might not
+appreciate it either.
+
+Some less intrusive way to provide reassurance and to raise the alarm
+when needed would be a great help to many people. Experience shows that
+alarm call buttons do not help, as many elderly people simply forget
+what they are for, so a system that does not require any action or
+change in behaviour is needed. Some people use webcams for this job,
+but they are very intrusive and should not be installed inside a home
+without very good reason.
+
+A better option would be a passive system that makes sure the elderly
+person is going about their normal daily routine, and raises the alarm
+if there is a significant change. This respects the privacy of active
+people while providing reassurance to relatives.
+
+Ideally, such a system should be installable by someone with minimal
+technical knowledge:
+
+	* Buy a Monitoring Mum kit, which arrives in a single box.
+	* Unpack it and spread the parts around Mum's house
+	* Use a simple website to list contacts to be informed of problems
+
+To be that simple would require:
+
+	1)	Most sensors to be battery powered, with a battery life
+		of a year or more
+	2)	Wireless comms for everything
+	3)	No requirement for an existing home network
+	4)	A central trustworthy website to act as control and
+		alarm distribution point
+	5)	A learning algorithm to determine 'normal behaviour'
+
+Meeting all requirements at a reasonable price would be a challenge,
+but how close can we get?
+
+I would like to do this with an open-source open-hardware model so that
+the trustworthiness of the whole system can be demonstrated.
+
+There is a business to be made from selling hardware and running the
+central service on a subscription basis. An example of this is TrueCall
+who sell malicious-call blockers and charge a yearly fee for the web
+dashboard.
+
+Consumers would be protected against the failure of the monitoring
+service by the open-source code. Any motivated techie would be able to
+run such a service and there would be a way to re-configure the hardware
+to work with it, This also allows for 'closed network' setups for the
+very security-conscious.
+
+There is probably a trade-off between number of sensors and effective
+self-learning. More sensors gives more information to work with. Maybe
+we start with a small number and insist that they go in specific places:
+
+	Kitchen
+	Bathroom / Toilet
+	Lounge
+	Bedroom
+
+A fairly simple algorithm would be able to give an alarm within a few
+hours based on the assumption that an active person will visit each type
+of space at least once per day.
+
+Sensors would measure:
+
+	Movement - PIR and/or ultrasonics and/or microwave doppler
+	Temperature
+	Light
+	Noise? e.g. listen for smoke alarms?
+	Their own health and battery state
+
+The starter kit would have a mains-powered controller and a few
+sensors. The controller would act as WiFi access point or equivalent
+for the sensors. We should assume that there will be several of these
+kits installed in close proximity: they must not be able to interfere
+with each other.
+
+There should be an easy and secure way to add more sensors to the
+setup. Maybe a special WiFi SSID that is only used for setup, plus a
+device ID that can be typed into the management site or loaded from a
+QR code.
+
+The controller would need mobile-phone-based Internet access to avoid
+depending on in-house networking.  A cheaper option would omit that but
+would require a more technical setup process.
+
+There should be apps for Android and for iPhone to receive alerts.
+
+The product version should not be called Monitoring Mum! Lassie might
+be a better choice if Disney don't hold the copyright...
+

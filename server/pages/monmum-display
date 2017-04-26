@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<HTML lang="en">
+<HEAD>
+<TITLE>Monitoring Mum</TITLE>
+
+<style>
+
+body {
+  font-family: "Helvetica Neue", Helvetica, sans-serif;
+  margin: 30px auto;
+  width: 1200px;
+  position: relative;
+}
+
+#daygraphs {
+  padding-top: 30px;
+}
+
+</style>
+
+<link rel="stylesheet" type="text/css" href="horizon.css">
+
+<script src="https://d3js.org/d3.v2.js" charset="utf-8"></script>
+<script src="https://square.github.io/cubism/cubism.v1.min.js"></script>
+<script src="https://d3js.org/d3-time.v1.min.js"></script>
+<script src="https://d3js.org/d3-time-format.v2.min.js"></script>
+<script data-require="moment.js@2.10.2" data-semver="2.10.2" src="https://momentjs.com/downloads/moment-with-locales.min.js"></script>
+<script data-require="moment-timezone-with-data@0.4.0" data-semver="0.4.0" src="https://momentjs.com/downloads/moment-timezone-with-data.js"></script>
+</HEAD>
+
+<BODY text="#000000" bgcolor="#FFFFFF">
+<div class="main">
+<!-- content starts here -->
+
+<h1>Monitoring Mum</h1>
+
+<!-- Horizon graphs showing past 36 hours from Monmum sensors -->
+<div id="daygraphs">
+</div>
+
+
+<script>
+
+var context = cubism.context()
+    .serverDelay(10000)
+    .step(120000)
+    .size(1200);
+//    .stop();
+
+// Colour sets. Arrays must have even number of elements. First half set colours for negative numbers, second half for positive.
+var redSet = ["#feedde", "#fdbe85", "#fd8d3c", "#d94701", "#feedde", "#fdbe85", "#fd8d3c", "#d94701"];
+var blueOrangeSet = [ "#eff3ff", "#bdd7e7", "#6baed6", "#2171b5", "#fed8b6", "#fdbe85", "#fd8d3c", "#d94701"];
+var bluePurpleSet = [ "#eff3ff", "#bdd7e7", "#6baed6", "#2171b5", "#d1bcff", "#ad94e6", "#8e71d0", "#664ba4"];
+
+targetTZ = "Europe/London";
+
+//    .data(["top", "bottom"])
+
+//d3.select("#daygraphs").selectAll(".axis")
+//    .data(["top"])
+//  .enter().append("div")
+//    .attr("class", function(d) { return d + " axis"; })
+//    .each(function(d) { d3.select(this).call(context.axis().ticks(12).orient(d)); });
+
+// Timezone/Locale-aware axis:
+//
+d3.select("#daygraphs").selectAll(".axis")
+    .data(["top"])
+  .enter().append("div")
+    .attr("class", function(d) { return d + " axis"; })
+    .each(function(d) { d3.select(this).call(context.axis().ticks(12).orient(d).tickFormat(function(d){
+          if (targetTZ === "local")
+            return moment(d).format('HH:mm');
+          else
+            return moment(d).tz(targetTZ).format('HH:mm');
+      })
+                                            ); });
+
+d3.select("body").append("div")
+    .attr("class", "rule")
+    .call(context.rule());
+
+
+[
+  {nodeid: "1925b6ef", location: "Living room"},
+  {nodeid: "1", location: "Living room 2"},
+  {nodeid: "2c19e0ef", location: "Bedroom"},
+  {nodeid: "2c198eef", location: "Bathroom"}
+].forEach( function(node) {
+    d3.select("#daygraphs")
+      .append("div")
+	.attr("class", "horizon")
+	.data([ { node: node.nodeid, series: "temp", label: node.location+" Temperature" } ].map(seriesData))
+      .call(context.horizon()
+	.height(40)
+	.extent([-20,40])
+	.colors( blueOrangeSet )
+	.format(d3.format("3f")));
+
+    d3.select("#daygraphs")
+      .append("div")
+	.attr("class", "horizon")
+	.data([ { node: node.nodeid, series: "light", label: node.location+" Light" } ].map(seriesData))
+      .call(context.horizon()
+	.height(40)
+	.extent([0,150])
+	.colors( bluePurpleSet )
+	.format(d3.format("3f")));
+
+    d3.select("#daygraphs")
+      .append("div")
+	.attr("class", "horizon")
+	.data([ { node: node.nodeid, series: "movement", label: node.location+" Movement" } ].map(seriesData))
+      .call(context.horizon()
+	.height(40)
+	.format(d3.format("3f")));
+
+//    d3.select("#daygraphs")
+//      .append("div")
+//	.attr("class", "horizon")
+//	.data([ { node: node.nodeid, series: "signal", label: node.location+" Signal" } ].map(seriesData))
+//      .call(context.horizon()
+//	.height(40)
+//	.format(d3.format("3f")));
+
+});
+
+context.on("focus", function(i) {
+  d3.selectAll(".value").style("right", i == null ? null : context.size() - i + "px");
+});
+
+
+// ##################################################################################
+
+// Fetch data from webservice
+// descriptor is a hash of the form: 
+//    { series: "light", label: "Light", colors: redSet },
+
+function seriesData(descriptor) {
+    return context.metric(function(start, stop, step, callback) {
+      var parseTime = d3.isoParse;
+      // The server wants queries expressed in UTC
+      var formatTime = d3.utcFormat("%Y%m%d%H%M%S");
+      var startTime = parseTime(start);
+      var stopTime = parseTime(stop);
+
+      d3.json("/bin/mumdata"
+          + "?series=" + encodeURIComponent(descriptor['series'])
+          + "&node=" + encodeURIComponent(descriptor['node'])
+          + "&start=" + encodeURIComponent(formatTime(startTime))
+          + "&stop=" + encodeURIComponent(formatTime(stopTime))
+          + "&step=" + step/1000, function(data) {
+        if (!data) return callback(new Error("unable to load data"));
+        callback(null, data.map(function(d) { return d.data; }));
+      });
+  }, descriptor['label']);
+}
+
+</script>
+
+
+<!-- end of content -->
+<p>
+<hr>
+<A HREF="/">Home</A>
+</p>
+</div>
+</BODY>
+</HTML>

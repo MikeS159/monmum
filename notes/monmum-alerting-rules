@@ -1,0 +1,58 @@
+Ideas for alerting rules
+========================
+
+Many of these rules only work if there is just one person in the house...
+
+HouseOccupiedNow:
+	Two or more movement sensor 'on' events in the past hour
+
+HouseOccupiedToday:
+	HouseOccupiedNow has been true at least once since 0400
+
+HouseOccupiedOvernight:
+	Time now is between 0400 and 23:30
+	and
+	HouseOccupiedNow was true at some time between 2100 (previous day) and 0400 today
+
+NoMovement:
+	HouseOccupiedNow has not been true at any time in the past 18 hours
+
+InBedroom:
+	Bedroom movement sensor has triggered more recently than any others
+
+InBathroom:
+	Bathroom movement sensor has triggered more recently than any others (needs a hallway sensor)
+	Alternative: Bathroom movement sensor has triggered within the past 5 minutes
+
+SatUpAllNight:
+	Time now is between 0600 and 2330
+	and
+	InBedroom was false at 0400
+
+StuckInBedroom:
+	InBedroom is true and no other sensor has triggered for 14 hours
+
+StuckInBathroom:
+	Bathroom movement sensor has triggered more recently than any others (needs a hallway sensor)
+	and
+	No other internal movement sensor has triggered in the past hour
+	
+
+
+TooHot:
+	Any temperature sensor reading above 28C
+
+TooCold:
+	InBedroom is true and bedroom temp below 16C
+	or
+	HouseOccupiedNow is true and InBedroom is false and living-room temp is below 20C
+
+Hypothermia:
+	HouseOccupiedNow is true and living-room temp is below 16C
+
+FrostRisk:
+	Any internal temp below 8C (heating is supposed to hold living room above 10C at all times)
+
+FreezeDamageImminent:
+	Any internal temp below 3C
+

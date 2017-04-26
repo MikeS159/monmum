@@ -1,0 +1,54 @@
+Using GL-AR150M micro router running OpenWRT as gateway for Monmum roomnodes
+
+Current firmware 2.22 - could update to 2.25
+BEWARE! Firmware update de-installs mosquitto and loses most of the config files.
+
+Set SSID, password (PSK), channel, and IP address
+Set admin password
+If connecting from WAN side, also need to note down serial number
+
+Use SSH as root for non-GUI tasks
+
+Could consider blocking NAT from WiFi to WAN, to further protect nodes.
+
+If you don't have IPv6:
+Need to disable IPv6 DHCP on LAN side to avoid logging loop complaining about
+a lack of globally routable prefixes on that net:
+	Network->Interfaces
+	Edit LAN
+	DHCP Server->IPv6 Settings
+	Set all DHCP v6 options to 'disabled'
+	Click 'Save and apply'
+
+Installed mosquitto v1.4.4-1 (latest is 1.4.10)
+Package does not include mosquitto_passwd so run that elsewhere to create file
+and paste into /etc/mosquitto/passwd
+
+Create user and group for mosquitto - uid 1883 gid 1883 - by editing files in /etc
+
+Install config file and X509 CA Certificate for mosquitto
+
+Add these lines to /etc/sysupgrade.conf to preserve config at upgrade time:
+/etc/mosquitto/mosquitto.conf
+/etc/mosquitto/passwd
+/etc/mosquitto/ca.cert
+
+
+If planning to monitor MQTT messages locally, use the advanced config page
+under Network-Firewall to add a traffic rule:
+	Name: mosquitto
+	Proto: TCP
+	External port: 1883
+Click Add, then Save+Apply
+
+Similarly for SSH:
+	Name: External SSH
+	Proto: TCP
+	External port: 22
+Click Add, then Save+Apply
+
+To test:
+	mosquitto_sub -v -h <IP addr> -u <user> -P <password> -t '#'
+
+
+

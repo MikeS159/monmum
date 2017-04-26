@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+#
+# mumdata - provide JSON data from Monitoring-Mum database
+#
+# This can run standalone for testing (listens on port 8080)
+# Normally runs under WSGI
+#
+# Query formats:
+#     http://<server>/bin/mumdata?series=nodes
+#     http://<server>/bin/mumdata?series=temp&node=2c1269ef&start=20170105195000&stop=20170106202500&step=300
+#
+# Andrew Findlay
+# 19 Dec 2016
+
+from __future__ import print_function
+
+import sys
+import time
+from datetime import datetime
+import argparse
+from influxdb import InfluxDBClient
+import ConfigParser
+import re
+import json
+import cgi
+
+# Disable this for production
+# import cgitb; cgitb.enable()  # for troubleshooting
+
+
+defaultConfigFile = '/fs1/www/ajf/dl1.findlays.net/etc/mumdata.conf'
+
+# Debug defaults off
+debug = False
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-d', '--debug', action='store_true', help='Print debug messages')
+parser.add_argument('-f', '--configfile', help='Configuration file', default=defaultConfigFile)
+args = parser.parse_args()
+
+if args.debug:
+    debug = True;
+
+# The config file has sections 'influxdb'
+# Each contains values for 'host' 'port' 'user' 'password'
+config = ConfigParser.SafeConfigParser()
+if not config.read(args.configfile):
+    print( "Cannot read config file " + args.configfile, file=sys.stderr)
+    exit(1)
+
+influxdbHost = config.get('influxdb', 'host')
+influxdbPort = config.get('influxdb', 'port')
+influxdbUser = config.get('influxdb', 'user')
+influxdbPass = config.get('influxdb', 'password')
+influxdbName = config.get('influxdb', 'dbname')
+
+if not (influxdbHost and influxdbPort and influxdbName and influxdbUser and influxdbPass):
+    print( "Config file must specify host,port,dbname,username and password in influxdb section", file=sys.stderr)
+    exit(2)
+
+# Prepare the InfluxDB client
+# influx = InfluxDBClient(host='127.0.0.1', port=8086, username='root', password='root', database='dbname')
+influx = InfluxDBClient(host=influxdbHost,
+			port=influxdbPort,
+			username=influxdbUser,
+			password=influxdbPass,
+			database=influxdbName,
+			timeout=5)
+
+# This is the method that is called for each HTTP request
+#
+def application(environ, start_response):
+    # Default result
+    status = '200 OK'
+    output = 'application called'
+
+    # FIXME: location must be derived from logged-in user or another request field
+    location = 'mansreach'
+
+    try:
+	# Parse a POST
+	if environ['REQUEST_METHOD'] == 'POST':
+	    post_env = environ.copy()
+	    # Ignore GET-style args in this case
+	    post_env['QUERY_STRING'] = ''
+	    form = cgi.FieldStorage(
+		fp=environ['wsgi.input'],
+		environ=post_env
+	    )
+
+	# Parse the GET request
+	if environ['REQUEST_METHOD'] == 'GET':
+	    form = cgi.FieldStorage(
+		fp=environ['wsgi.input'],
+		environ=environ
+	    )
+
+	# Check that we have all the request fields
+	# The ones we need depend on the series that has been requested, so process that first
+	if "series" not in form:
+	    output = "Please fill in the series field."
+	    raise ValueError
+	reqSeries = form["series"].value
+
+	if not re.match( r'[a-zA-Z0-9]+$', reqSeries ):
+	    output = "Bad series value"
+	    raise ValueError
+
+	if debug:
+	    print( "Series: " + reqSeries, file=sys.stderr)
+
+	if reqSeries not in ["nodes"]:
+                # Most queries require a date range and a step interval
+		if "node" not in form or "start" not in form or "stop" not in form or "step" not in form:
+		    output = "Please fill in the node,start,stop and step fields."
+		    raise ValueError
+
+		reqStart = form["start"].value
+		reqStop = form["stop"].value
+		reqStep = form["step"].value
+		reqNode = form["node"].value
+
+		if not re.match( r'[a-zA-Z0-9]+$', reqNode ):
+		    output = "Bad node value"
+		    raise ValueError
+
+		try:
+		    startTime = time.strftime( "%Y-%m-%dT%H:%M:%SZ", time.strptime( reqStart, "%Y%m%d%H%M%S" ))
+		    stopTime = time.strftime( "%Y-%m-%dT%H:%M:%SZ", time.strptime( reqStop, "%Y%m%d%H%M%S" ))
+		except:
+		    output = "Bad time format in start or stop value"
+		    raise ValueError
+
+
+		if re.match( r'[0-9]+$', reqStep ):
+		    stepTime = int(reqStep);
+		    if stepTime < 1 or stepTime > 86400*7:
+			output = "Bad step value"
+			raise ValueError
+		else:
+		    output = "Bad step value"
+		    raise ValueError
+
+		if debug:
+		    print( "Node: " + reqNode, file=sys.stderr)
+		    print( "Start: " + reqStart, file=sys.stderr)
+		    print( "Stop: " + reqStop, file=sys.stderr)
+		    print( "Step: " + reqStep, file=sys.stderr)
+
+	data = None
+
+	if reqSeries == "nodes":
+            # We query for known nodes using uptime as that gets reported every minute.
+            # If we used '$online' there is a risk that a long-running node would have that
+            # record aged out by the InfluxDB expiry policy even though the node is still reporting data.
+	    data = influx.query( 'select last("homie"),"node" from "{location}" where category = \'$stats/uptime\' group by "node"'.format(location=location) )
+	elif reqSeries == "light":
+	    data = influx.query( 'select MEAN("lux") as data from "{location}" where node=\'{reqNode}\' and category=\'light\' and instance=\'level\' and time > \'{startTime}\' and time <= \'{stopTime}\' group by time({stepTime}s)'.format(reqNode=reqNode, startTime=startTime, stopTime=stopTime, stepTime=str(stepTime), location=location) )
+	elif reqSeries == "temp":
+	    data = influx.query( 'select MEAN("celsius") as data from "{location}" where node=\'{reqNode}\' and category=\'temperature\' and instance=\'internal\' and time > \'{startTime}\' and time <= \'{stopTime}\' group by time({stepTime}s)'.format(reqNode=reqNode, startTime=startTime, stopTime=stopTime, stepTime=str(stepTime), location=location ) )
+	elif reqSeries == "movement":
+	    data = influx.query( 'select COUNT("moving") as data from "{location}" where node=\'{reqNode}\' and category=\'movement\' and instance=\'recent\' and moving=true and time > \'{startTime}\' and time <= \'{stopTime}\' group by time({stepTime}s)'.format(reqNode=reqNode, startTime=startTime, stopTime=stopTime, stepTime=str(stepTime), location=location ) )
+	elif reqSeries == "signal":
+	    data = influx.query( 'select MIN("homie") as data from "{location}" where node=\'{reqNode}\' and category=\'$stats/signal\' and time > \'{startTime}\' and time <= \'{stopTime}\' group by time({stepTime}s)'.format(reqNode=reqNode, startTime=startTime, stopTime=stopTime, stepTime=str(stepTime), location=location ) )
+	else:
+	    output = "Series not recognised"
+	    raise ValueError
+
+	if debug:
+	    print( "Data: ", file=sys.stderr)
+	    print( list(data.get_points()), file=sys.stderr)
+
+	if data is None:
+	    output = "Database query error"
+	    raise ValueError
+	else:
+	    output = json.dumps(list(data.get_points())).encode("utf-8")
+
+	# All looks good - return JSON data
+	response_headers = [('Content-type', 'application/json'),
+			    ('Content-Length', str(len(output)))]
+	start_response(status, response_headers)
+	return [output]
+
+    except ValueError:
+	status = '400 Bad Request'
+    except:
+	# This might indicate a serious problem, so try to log the details
+	raise
+
+    response_headers = [('Content-type', 'text/plain'),
+			('Content-Length', str(len(output)))]
+    start_response(status, response_headers)
+    return [output]
+
+# Test code
+if __name__ == '__main__':
+    try:
+        from wsgiref.simple_server import make_server
+        httpd = make_server('', 8080, application)
+        print('Serving on port 8080...', file=sys.stderr)
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print('Goodbye.', file=sys.stderr)
+
+

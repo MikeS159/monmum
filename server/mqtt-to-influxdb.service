@@ -1,0 +1,18 @@
+# Receive datalogger info from MQTT queue and record it in InfluxDB database
+
+[Unit]
+Description=Datalogger: MQTT to InfluxDB for Monitoring Mum project
+Requires=mosquitto.target,infuxdb.target
+After=mosquitto.target,infuxdb.target
+
+[Service]
+Type=simple
+ExecStart=/fs1/www/ajf/dl1.findlays.net/libexec/mqtt-to-influxdb
+User=www-data
+Group=www-data
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,27 @@
+Monitoring Mum
+
+Tele-caring with the Internet of Things, Open Source and Open Hardware
+
+Andrew Findlay, Skills 1st Ltd
+
+27th April 2017
+
+People are living longer than ever before, and the pattern of retirement
+tends to be a period of good health followed by a gradual decline
+over several years with increasing amounts of support being needed.
+
+Remote monitoring can give confidence to carers that the older
+person is still coping: moving around the house, cooking, taking baths,
+and keeping warm. The challenge is to do this without intruding too much
+into the life and privacy of the person being monitored, and yet to
+raise an alarm when necessary.
+
+This talk will describe an Internet-of-Things monitoring system
+using readily-available components. Sensors measure light, temperature
+and movement, which they report via message queues to be stored
+in a time-series database. The system is designed to allow either
+a cloud-based logging and alerting service or a completely private
+infrastructure. Hardware and software designs are openly available,
+giving confidence that personal data can be properly controlled and
+mitigating the risk of a failed service company.
+
